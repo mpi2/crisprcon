@@ -1,0 +1,122 @@
+########################################
+# CrisprCon		               #
+# Crispr/Cas allele analysis. 	       #
+# EMBL-EBI 			       #
+########################################
+
+# PROJECT URLs:
+https://github.com/mpi2/crisprcon
+http://www.mousephenotype.org/
+
+# CONTACT:
+International Mouse Phenotyping Consortium (IMPC):
+mouse-helpdesk@ebi.ac.uk
+
+Mouse Informatics Project leader:
+Terry Meehan (tmeehan@ebi.ac.uk)
+
+
+############
+# CONTENTS # 
+############
+
+1. General Information
+2. Variant calling (crispFa)
+3. gRNA consequence prediction (crispRNA)
+
+# Last updated: June 2018
+
+
+##########################
+# 1. General Information #
+##########################
+
+
+# Reference genome
+All variant calls are relative to a reference genome, e.g: C57BL/6J (GRCm38).
+An example of the last major release of the reference genome can be found here:
+ftp://ftp.ncbi.nlm.nih.gov/genomes/archive/old_genbank/Eukaryotes/vertebrates_mammals/Mus_musculus/GRCm38/
+
+# Annotation file
+A GFF file is used for the consequence prediction of the variants.
+An example of a GFF file can be found here:
+ftp://ftp.ensembl.org/pub/release-92/gff3/mus_musculus/Mus_musculus.GRCm38.92.gff3.gz
+
+
+Usage: ./crisprcon.py [-h] {crispFa,crispRNA}
+
+    crispFa           Variant caller for CRISPR edited alleles
+    crispRNA          gRNA consequence predictor. It takes the coordinates of
+                      gRNA and it outputs a VCF with the predicted
+                      consequences
+
+#####################################
+# 2. Variant calling (crispFa)      #
+#####################################
+
+
+Usage: ./crisprcon.py crispFa [-h] [-i INPUT_FA] [-o OUTPUT_VCF] [-f REF_GENOME]
+                        [-r COORDS] [-g GFF] [-d OUT_DIR] [-t TEMP_DIR]
+                        [-p PREFIX] [-c GRNA GRNA]
+
+Positional arguments:
+  -i INPUT_FA, --input INPUT_FA
+                        Input FASTA.
+  -o OUTPUT_VCF, --output OUTPUT_VCF
+                        Output VCF file.
+  -f REF_GENOME, --fasta-ref REF_GENOME
+                        Reference file in fasta format (must be .fai indexed)
+  -r COORDS, --region COORDS
+                        Coordinates of CRISPR/Cas target region (ie: chr:start-end)
+  -g GFF, --gff-annot GFF
+                        gff3 annotation file
+
+Optional arguments:
+  -d OUT_DIR, --dir OUT_DIR
+                        Optional: Directory for the output files. If not present, it will be created. Default: current directory
+  -t TEMP_DIR, --temp TEMP_DIR
+                        Optional: Directory for temporary and intermediate files. Default: creates "temp" directory at the output directory
+  -p PREFIX, --prefix PREFIX
+                        Optional: Prefix for temporary files. Default: input_name
+  -c GRNA GRNA, --crispr-grna GRNA GRNA
+                        Optional: gRNA pair coordinates used for CRISPR. Advised for validation of indels and potential false positives. Use different flags for more than one pair.
+                        Eg: -c 72206978 72207000 -c 72206982 72207004
+  -h, --help            Show this help message and exit
+
+
+
+##############################################
+# 3. gRNA consequence prediction (crispRNA)  #
+##############################################
+
+
+Usage: crispCon crispRNA [-h] [-o OUTPUT_VCF] [-f REF_GENOME] [-g GFF]
+                         [-c GRNA GRNA] [-s DONOR] [-d OUT_DIR] [-t TEMP_DIR]
+                         [-p PREFIX]
+
+Positional arguments:
+  -o OUTPUT_VCF, --output OUTPUT_VCF
+                        Output VCF file.
+  -f REF_GENOME, --fasta-ref REF_GENOME
+                        Reference file in fasta format (must be .fai indexed)
+  -g GFF, --gff-annot GFF
+                        gff3 annotation file
+  -c GRNA GRNA, --crispr-grna GRNA GRNA
+                        gRNA pair coordinates and sequence used for CRISPR (sequence chr:start-end). Use different flags for more than one pair. 
+			Eg: -c GATTCTGGCATCATCTATGTGGG 1:72206978-72207000 -c GCTTCTGCCAATATCTATTTGGG 1:72206982-72207004
+  -s DONOR, --seq-donor DONOR
+                        Sequence of the oligo donor
+
+Optional arguments:
+  -d OUT_DIR, --dir OUT_DIR
+                        Optional: Directory for the output files. If not present, it will be created. Default: current directory
+  -t TEMP_DIR, --temp TEMP_DIR
+                        Optional: Directory for temporary and intermediate files. Default: creates "temp" directory at the output directory
+  -p PREFIX, --prefix PREFIX
+                        Optional: Prefix for temporary files. Default: input_name
+  -h, --help            Show this help message and exit
+
+
+
+
+
