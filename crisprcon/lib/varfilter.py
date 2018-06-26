@@ -6,7 +6,7 @@ import csv
 import os
 import sys
 from .infervariants import get_ref
-from .infervariants import vcf_header
+from .vcfheader import vcf_header
 
 
 try:

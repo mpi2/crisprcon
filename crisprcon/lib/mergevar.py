@@ -1,7 +1,7 @@
 
 import subprocess
 from .varfilter import _parse_vcf
-from .infervariants import vcf_header
+from .vcfheader import vcf_header
 
 
 def mergeVar(SR_vcf, MM_vcf, out_vcf):
