@@ -17,7 +17,7 @@ Terry Meehan (tmeehan@ebi.ac.uk)
 
 
 ############
-# CONTENTS # 
+# CONTENTS #
 ############
 
 1. General Information
@@ -102,7 +102,7 @@ Positional arguments:
   -g GFF, --gff-annot GFF
                         gff3 annotation file
   -c GRNA GRNA, --crispr-grna GRNA GRNA
-                        gRNA pair coordinates and sequence used for CRISPR (sequence chr:start-end). Use different flags for more than one pair. 
+                        gRNA pair coordinates and sequence used for CRISPR (sequence chr:start-end). Use different flags for more than one pair.
 			Eg: -c GATTCTGGCATCATCTATGTGGG 1:72206978-72207000 -c GCTTCTGCCAATATCTATTTGGG 1:72206982-72207004
   -s DONOR, --seq-donor DONOR
                         Sequence of the oligo donor
@@ -115,8 +115,3 @@ Optional arguments:
   -p PREFIX, --prefix PREFIX
                         Optional: Prefix for temporary files. Default: input_name
   -h, --help            Show this help message and exit
-
-
-
-
-
