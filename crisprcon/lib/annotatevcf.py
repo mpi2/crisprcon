@@ -2,7 +2,7 @@
 import os
 import subprocess
 from .varfilter import _parse_vcf
-from .infervariants import vcf_header
+from .vcfheader import vcf_header
 
 
 def annotatevcf(vcf, gff, ref, temp):
