@@ -2,7 +2,7 @@
 import subprocess
 from .cigarParser import parse_cigar
 from sys import exit
-from .alignment import flatten, reverseComplement
+from .alignment import flatten
 from .ssr import _isSSR, _getSsrType, _ssrReadPos, TARGET_SEQ, mergeINS
 from .vcfheader import vcf_header
 
@@ -13,7 +13,8 @@ def main(dictBam, out_vcf, ref_genome, in_fa, temp, prefix):
 
     with open(out_vcf, mode='w') as writer:
         out = []
-        writer.write(vcf_header)
+        header = vcf_header(ref_genome)
+        writer.write(header.h)
         if _isSSR(in_fa):
             with open(in_fa, 'r') as fasta_ssr:
                 for line in fasta_ssr:
@@ -65,10 +66,12 @@ def inferVariants(dictBam, ref_genome, in_fa, minSV, fasta):
 
     i = 0
     while i < len(dictBam)-1:
+        print ('Iteration number')
+        print (i)
         read = [c for c in dictBam if c['rpos'] == i][0]
         if len(dictBam) == 2:
             nread = [c for c in dictBam if c['rpos'] == i+1][0]
-            output.append(inferSimpleSV(read=read, nread=nread, ncread=nread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
+            output.append(inferSimpleSV(read=read, nread=nread, ncread=nread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False, dictBam=dictBam))
             i += 1
         elif len(dictBam) > 2:
             nread = [c for c in dictBam if c['rpos'] == i+1][0]
@@ -93,20 +96,20 @@ def inferVariants(dictBam, ref_genome, in_fa, minSV, fasta):
 
             if nread == ncread:
                 print ('one')
-                output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
+                output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False, dictBam=dictBam))
             elif nread['ge'] <= homArmDown['gs'] or nread['gs'] >= homArmUps['ge'] or nread['chrom'] != gc:
                 print ('two')
                 output.append(inferDUP(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
-                output.append(inferSimpleSV(read=read, nread=ncread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=True))
+                output.append(inferSimpleSV(read=read, nread=ncread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=True, dictBam=dictBam))
                 i += 1
             # elif (go == '+' and nread['gs'] >= read['ge'] and nread['ge'] <= ncread['gs']) or (go == '-' and nread['ge'] <= read['gs'] and nread['gs'] >= ncread['ge']):
             elif (nread['gs'] >= read['ge'] and nread['ge'] <= ncread['gs']):
                 print ('three')
-                output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
+                output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False, dictBam=dictBam))
             elif (nread['gs'] >= read['gs'] and nread['ge'] <= read['ge']) or (nread['gs'] >= ncread['gs'] and nread['ge'] <= ncread['ge']):
                 print ('four')
-                output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
-                output.append(inferSimpleSV(read=read, nread=ncread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=True))
+                output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False, dictBam=dictBam))
+                output.append(inferSimpleSV(read=read, nread=ncread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=True, dictBam=dictBam))
                 i += 1
             # elif go == '+' and (nread['ge'] <= read['gs'] or nread['gs'] >= ncread['ge']):
             #     output.append(inferDUP(read=read, nread=nread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
@@ -162,7 +165,7 @@ def inferIndels(dictBam, ref_genome):
 #     for i in range(len(dictBam)):
 
 
-def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested):
+def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested, dictBam):
     sv = []
     if nread['gs'] - read['ge'] > minSV:
         svstart = read['ge'] - 1
@@ -172,9 +175,9 @@ def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested)
         ref = get_ref(ref_genome, read['chrom'], (svstart), int(svend))
         alt = ref[0]
         sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend))
-
+        print ('THe deletion is')
+        print (sv)
     if (max(nread['rs'], read['rs']) - min(read['re'], nread['re'])) - [nread['gs'] - read['ge'] if nread['gs'] - read['ge'] > 0 else 0][0] > minSV:
-        # svstart = read['ge'] - 1 if go == '+' else nread['ge'] - 1
         svstart = read['ge'] - 1
         svend = svstart
         svtype = 'INS'
@@ -183,7 +186,6 @@ def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested)
         sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svend))
 
     elif min(read['re'], nread['re']) < max(nread['rs'], read['rs']) and nested is False:
-        # svstart = read['ge'] - 1 if go == '+' else nread['ge'] - 1
         svstart = read['ge'] - 1
         svend = svstart
         svtype = 'INS'
@@ -191,8 +193,7 @@ def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested)
         alt = ref + fasta[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]
         sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svend))
 
-    if min(nread['re'], ncread['re']) < max(nread['rs'], ncread['rs']) and nested is False and nread != ncread:
-        # svstart = read['ge'] - 1 if go == '+' else nread['ge'] - 1
+    if min(nread['re'], ncread['re']) < max(nread['rs'], ncread['rs']) and nested is False and nread != ncread and ncread['rpos'] == nread['rpos'] + 1:
         svstart = read['ge'] - 1
         svend = svstart
         svtype = 'INS'
@@ -200,45 +201,36 @@ def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested)
         alt = ref + fasta[min(nread['re'], ncread['re'])-1:max(ncread['rs'], nread['rs'])-1]
         sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={}\n'.format(nread['chrom'], svstart, ref, alt, svtype, svend))
 
+    if min(read['ge'], nread['ge']) > max(nread['gs'], read['gs']) + minSV:
+        if read['ge'] == nread['gs']:
+            # TODO: Maybe we can allow for more than 1 tandem duplication
+            cs = max(nread['gs'], read['gs'])
+            ce = min(read['ge'], nread['ge'])
+            dupSeq = get_ref(ref_genome, read['chrom'], cs - 1, ce - 1)
+            svstart = max(read['ge'], nread['ge']) - 1
+            svend = svstart
+            svlen = len(dupSeq)
+            svtype = 'DUP:TANDEM' if nread['strand'] == go else 'INVDUP:TANDEM'
+            ref = get_ref(ref_genome, read['chrom'], svstart, svend)
+            alt = ref + dupSeq
+            coords = '{}:{}-{}'.format(nread['chrom'], cs, ce - 1)
+            sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend, coords))
+            return (sv)
 
-    # if (nread['gs'] - read['ge']) > minSV and (nread['rs'] - read['re']) < minSV:
-    if min(read['ge'], nread['ge']) > max(nread['gs'], read['gs']) + minSV and (max(nread['rs'], read['rs']) - min(read['re'], nread['re'])) <= minSV:
-        # svstart = nread['gs'] - 1 if go == '+' else read['gs'] - 1
-        # svend = read['ge'] - 1 if go == '+' else nread['ge'] - 1
-        cs = max(nread['gs'], read['gs'])
-        ce = min(read['ge'], nread['ge'])
-        # dupSeq = get_ref(ref_genome, int(read['chrom']), (int(nread['gs'])), int(read['ge']))
-        dupSeq = get_ref(ref_genome, read['chrom'], cs - 1, ce - 1)
-        svstart = max(read['ge'], nread['ge']) - 1
-        svend = svstart
-        # ndups = 2  # TODO: Allow for more than 1 tandem duplication
-        # ndups = 0
-        # nnread = read[i + 1 + ndups]
-        # while read['ge'] == nnread['ge']:
-        #     ndups += 1
-        #     nnread = read[i + 1 + ndups]
-        svlen = len(dupSeq)
-        svtype = 'DUP:TANDEM' if nread['strand'] == go else 'INVDUP:TANDEM'
-        ref = get_ref(ref_genome, read['chrom'], svstart, svend)
-        alt = ref + dupSeq
-        coords = '{}:{}-{}'.format(nread['chrom'], cs, ce - 1)
-        sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend, coords))
-        return (sv)
+        else:
+            cs = max(nread['gs'], read['gs'])
+            ce = min(read['ge'], nread['ge'])
+            svstart = max(read['ge'], nread['ge']) - 1
+            svend = svstart
+            dupSeq = get_ref(ref_genome, read['chrom'], cs - 1, ce - 1)
 
-    elif min(read['ge'], nread['ge']) > max(nread['gs'], read['gs']) + minSV and (max(nread['rs'], read['rs']) - min(read['re'], nread['re'])) > minSV:
-        cs = max(nread['gs'], read['gs'])
-        ce = min(read['ge'], nread['ge'])
-        svstart = max(read['ge'], nread['ge']) - 1
-        svend = svstart
-        dupSeq = get_ref(ref_genome, read['chrom'], cs - 1, ce - 1)
-
-        svlen = len(dupSeq)
-        svtype = 'DUP' if nread['strand'] == go else 'INVDUP'
-        ref = get_ref(ref_genome, read['chrom'], int(svstart), int(svend))
-        alt = ref + nread['seq']
-        coords = '{}:{}-{}'.format(nread['chrom'], cs, ce - 1)
-        sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend, coords))
-        return(sv)
+            svlen = len(dupSeq)
+            svtype = 'DUP' if nread['strand'] == go else 'INVDUP'
+            ref = get_ref(ref_genome, read['chrom'], int(svstart), int(svend))
+            alt = ref + nread['seq']
+            coords = '{}:{}-{}'.format(nread['chrom'], cs, ce - 1)
+            sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend, coords))
+            return(sv)
 
     if nread['strand'] != go:
         svstart = nread['gs']
@@ -266,7 +258,6 @@ def inferDUP(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested):
     sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svend, coords))
 
     if min(read['re'], nread['re']) < max(nread['rs'], read['rs']) and nested is False:
-        # svstart = read['ge'] - 1 if go == '+' else nread['ge'] - 1
         svstart = read['ge'] - 1
         svend = svstart
         svtype = 'INS'
