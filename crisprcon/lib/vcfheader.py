@@ -1,6 +1,9 @@
-vcf_header = '''##fileformat=VCFv4.2
+class vcf_header:
+    def __init__(self, ref_genome):
+        ref_genome = ref_genome.split('/')[-1]
+        self.h = '''##fileformat=VCFv4.2
 ##FILTER=<ID=PASS,Description="All filters passed">
-##reference=file:///reference/GRCm38_68.fa
+##reference=file:///{}
 ##contig=<ID=1>
 ##contig=<ID=2>
 ##contig=<ID=3>
@@ -54,4 +57,4 @@ vcf_header = '''##fileformat=VCFv4.2
 ##INFO=<ID=MQ,Number=1,Type=Integer,Description="Average mapping quality">
 ##INFO=<ID=BCSQ,Number=.,Type=String,Description="Haplotype-aware consequence annotation from BCFtools/csq. Format: '[*]consequence|gene|transcript|biotype[|strand|amino_acid_change|dna_change][|biotype_name|biotype_proportion_affected]' or, for consequences of variants split across multiple sites, a pointer to the record storing the consequences '@position'. '*' prefix indicates a consequence downstream from a stop">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
-'''
+'''.format(ref_genome)

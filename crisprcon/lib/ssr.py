@@ -1,5 +1,6 @@
 
 from .cigarParser import parse_cigar
+from difflib import SequenceMatcher
 # from .alignment import reverseComplement
 
 TARGET_SEQ = {
@@ -85,10 +86,16 @@ def _ssrReadPos(fasta, dictBam):
 
 def get_pseq(fasta, pos, dictBam, ssr_seq):
     pseq = fasta[(pos - 20):pos]
+    print ('Pseq before any changes')
+    print (pseq)
     if not any([c['seq'].find(pseq) >= 0 for c in dictBam]):
         pseq = fasta[(pos + len(ssr_seq)):(pos + len(ssr_seq) + 20)]
+        print ('Not before so we try after')
+        print (pseq)
     if not any([c['seq'].find(pseq) >= 0 for c in dictBam]):
         pseq = False
+        print ('Nothing works')
+        print (pseq)
     return (pseq)
 
 
@@ -109,21 +116,41 @@ def get_ssrPos(ssr_read, pos, fasta, ssr_seq, pseq, dictBam):
     go = [c['strand'] for c in dictBam if c['rpos'] == 0][0]
     cigarParsed = parse_cigar(ssr_read['cigar'])
     if pseq is False:
-        # gpos = ssr_read['gs'] if ssr_read['strand'] == '+' else ssr_read['ge']
-        gpos = ssr_read['gs']
-        gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
-        return (gpos)
-    # pseq_pos = fasta.find(pseq) if [c['strand'] for c in dictBam if c['rpos'] == 0][0] == '+' else fasta.find(reverseComplement(pseq))
+        if ssr_read['rpos'] != 0:
+            gpos = dictBam[ssr_read['rpos'] - 1]['ge']
+            gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
+            return (gpos)
+        else:
+            gpos = ssr_read['gs']
+            gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
+            return (gpos)
     pseq_pos = fasta.find(pseq)
+    print ('This is pseq')
+    print (pseq)
+    print ('This is pseq_pos')
+    print (pseq_pos)
+    print ('This is pos')
+    print (pos)
+    print ('This is ssr_read')
+    print (ssr_read)
+
     if pos > pseq_pos:
         rpos = ssr_read['seq'].find(pseq) + 20
     else:
         rpos = ssr_read['seq'].find(pseq) - 20 - len(ssr_seq)
+    print ('This is rpos')
+    print (rpos)
+
     if rpos < 0:
         # gpos = ssr_read['gs'] if ssr_read['strand'] == '+' else ssr_read['ge']
-        gpos = ssr_read['gs']
-        gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
-        return (gpos)
+        if ssr_read['rpos'] != 0:
+            gpos = dictBam[ssr_read['rpos'] - 1]['ge']
+            gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
+            return (gpos)
+        else:
+            gpos = ssr_read['gs']
+            gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
+            return (gpos)
     if rpos > ssr_read['re']:
         # gpos = ssr_read['ge'] if ssr_read['strand'] == '+' else ssr_read['gs']
         gpos = ssr_read['ge']
@@ -144,6 +171,11 @@ def get_ssrPos(ssr_read, pos, fasta, ssr_seq, pseq, dictBam):
 
     gpos = gpos + (rpos - gposM) + ssr_read['gs']
     gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
+    print ('This is gpos')
+    print (gpos)
+    if gpos == ssr_read['gs'] and ssr_read['rpos'] != 0:
+        gpos = dictBam[ssr_read['rpos'] - 1]['ge']
+
     return (gpos)
 
 
@@ -193,12 +225,25 @@ def mergeINS(vcf, read, dictBam):
                     print ('These are the positions of the sequences. Should be higher than 0')
                     print (varSeqPos)
                     print (nvarSeqPos)
-                    if varSeqPos < nvarSeqPos:
-                        seq = var[4] + nvar[4][1:]
+                    if nvarSeqPos > 0:
+                        if varSeqPos < nvarSeqPos:
+                            seq = var[4] + nvar[4][1:]
+                        else:
+                            seq = nvar[4] + var[4][1:]
+                        vcf_out.append([var[0], var[1], var[2], var[3], seq, var[5], var[6], var[7]])
+                        i += 1
                     else:
-                        seq = nvar[4] + var[4][1:]
-                    vcf_out.append([var[0], var[1], var[2], var[3], seq, var[5], var[6], var[7]])
-                    i += 1
+                        # If nvarSeqPos is -1, we have a LOXP in the middle of a novel sequence
+                        ssr_seq = var[4][1:]
+                        ins_seq = nvar[4][1:]
+                        read_split = read.split(ssr_seq)
+                        ins1_match = SequenceMatcher(None, read_split[0], ins_seq).find_longest_match(0, len(read_split[0]), 0, len(ins_seq))
+                        ins1_seq = read_split[0][ins1_match.a: ins1_match.a + ins1_match.size]
+                        ins2_match = SequenceMatcher(None, read_split[1], ins_seq).find_longest_match(0, len(read_split[1]), 0, len(ins_seq))
+                        ins2_seq = read_split[1][ins2_match.a: ins2_match.a + ins2_match.size]
+                        seq = var[4][0] + ins1_seq + ssr_seq + ins2_seq
+                        vcf_out.append([var[0], var[1], var[2], var[3], seq, var[5], var[6], var[7]])
+                        i += 1
                 else:
                     vcf_out.append(var)
                 ssr_n += 1
@@ -215,12 +260,25 @@ def mergeINS(vcf, read, dictBam):
                     print (varSeqPos)
                     print (nvarSeqPos)
                     # Merge them in the same order
-                    if varSeqPos < nvarSeqPos:
-                        seq = var[4] + nvar[4][1:]
+                    if varSeqPos > 0:
+                        if varSeqPos < nvarSeqPos:
+                            seq = var[4] + nvar[4][1:]
+                        else:
+                            seq = nvar[4] + var[4][1:]
+                        vcf_out.append([var[0], var[1], var[2], var[3], seq, var[5], var[6], var[7]])
+                        i += 1
                     else:
-                        seq = nvar[4] + var[4][1:]
-                    vcf_out.append([var[0], var[1], var[2], var[3], seq, var[5], var[6], var[7]])
-                    i += 1
+                        # If nvarSeqPos is -1, we have a LOXP in the middle of a novel sequence
+                        ssr_seq = nvar[4][1:]
+                        ins_seq = var[4][1:]
+                        read_split = read.split(ssr_seq)
+                        ins1_match = SequenceMatcher(None, read_split[0], ins_seq).find_longest_match(0, len(read_split[0]), 0, len(ins_seq))
+                        ins1_seq = read_split[0][ins1_match.a: ins1_match.a + ins1_match.size]
+                        ins2_match = SequenceMatcher(None, read_split[1], ins_seq).find_longest_match(0, len(read_split[1]), 0, len(ins_seq))
+                        ins2_seq = read_split[1][ins2_match.a: ins2_match.a + ins2_match.size]
+                        seq = var[4][0] + ins1_seq + ssr_seq + ins2_seq
+                        vcf_out.append([var[0], var[1], var[2], var[3], seq, var[5], var[6], var[7]])
+                        i += 1
                 else:
                     vcf_out.append(var)
             i += 1

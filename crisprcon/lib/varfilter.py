@@ -72,8 +72,8 @@ def _filter_vcf(dictreader, outVCF, dictBam, grna, hs, he, ref_genome):
     _vcf_fields = ('CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO')
 
     with open(outVCF + 'temp', mode='w') as writer:
-
-        writer.write(vcf_header)
+        header = vcf_header(ref_genome)
+        writer.write(header.h)
         # writer.write('#{}\n'.format('\t'.join(_vcf_fields)))
 
         output_vcf = []

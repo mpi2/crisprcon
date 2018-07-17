@@ -14,7 +14,7 @@ def annotatevcf(vcf, gff, ref, temp):
     with open(vcf_intersect) as reader:
         dictreader = _parse_vcf(reader)
         # Write out file
-        vcf_format(dictreader, vcf_temp)
+        vcf_format(dictreader, vcf_temp, ref)
 
     subprocess.call(['bcftools', 'view',
                      vcf_temp,
@@ -48,6 +48,7 @@ def csq(vcf_in, vcf_out, gff, ref):
     subprocess.call(['bcftools', 'csq',
                      '-g', gff,
                      '-f', ref,
+                     '--force',
                      '-Oz',
                      '-o', vcf_out,
                      vcf_in])
@@ -78,13 +79,13 @@ def add_exon_csq(vcf, gff, output):
     p1.stdout.close()
 
 
-def vcf_format(dictreader, vcf_out):
+def vcf_format(dictreader, vcf_out, ref_genome):
 
     _vcf_fields = ('CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO')
 
     with open(vcf_out, 'w') as writer:
-
-        writer.write(vcf_header)
+        header = vcf_header(ref_genome)
+        writer.write(header.h)
         # writer.write('#{}\n'.format('\t'.join(_vcf_fields)))
 
         output_vcf = []
