@@ -36,13 +36,13 @@ def main(in_fa, out_bam, ref, mref, chrom, ts, te, temp, prefix):
     if len(sam) == 0:
         exit('ERROR: Failing to align. No alignments found.')
 
-    # Create sam file
+    # Create sam file (for visualization or evidence. Not used in the pipeline)
     samHeader(ref=ref, sam=sam, out_bam=out_bam)
 
     # Create a dictionary of the alignments that will be used in the variant calling
     dictBam = sam2dict(sam=sam, in_fa=in_fa)
     dictBam = sorted(dictBam, key=lambda k: (k['rpos']))
-    dictBam = dictBam_QC(dictBam, in_fa)  # Just check if the order of the reads is correct
+    dictBam = dictBam_QC(dictBam, in_fa)  # Just check if the order of the reads is correct (non_overlapping starts and ends)
 
     # Invert the order of the reads if the homology arms aligned to the reverse strand
     if [c['strand'] for c in dictBam if c['rpos'] == 0][0] == '-':
@@ -77,6 +77,7 @@ def bwaAlign(in_fa, ref, mref, temp, chrom, ts, te, prefix):
                     continue
                 sam.append(read)
                 cigar = parse_cigar(read.split('\t')[5])
+                # If there is any clipping, recover the clipped fragment and call bwaAlign with it.
                 if any(['S' in c for c in cigar]):
                     readPos = 0
                     it = 1
@@ -97,6 +98,7 @@ def bwaAlign(in_fa, ref, mref, temp, chrom, ts, te, prefix):
                         it += 1
 
             if len(line) > 50 and len(line) < 90:
+            # if len(line) > 50:
                 if not os.path.exists(mref):
                     trimRef(ref, chrom, int(ts) - interval, int(te) + interval, mref)
                 read = largeAlign(in_fa, mref)
@@ -336,6 +338,18 @@ def sam2dict(sam, in_fa):
 
 
 def dictBam_QC(dictBam, in_fa):
+    qc = is_qc(dictBam)
+    it = 0
+    while not qc:
+        it += 1
+        dictBam = dictBam_reOrder(dictBam, in_fa)
+        print ('This is the qc iteration')
+        print (it)
+        qc = is_qc(dictBam)
+    return (dictBam)
+
+
+def is_qc(dictBam):
     qc = True
     i = 0
     limit = len(dictBam)
@@ -351,9 +365,7 @@ def dictBam_QC(dictBam, in_fa):
             if st < pend or [st, end] == [pst, pend]:
                 qc = False
             i += 1
-    if not qc:
-        dictBam = dictBam_reOrder(dictBam, in_fa)
-    return (dictBam)
+    return (qc)
 
 
 def dictBam_reOrder(dictBam, in_fa):
@@ -365,4 +377,7 @@ def dictBam_reOrder(dictBam, in_fa):
         dictBam[i]['rs'] = st
         dictBam[i]['re'] = int(st) + len(seq)
         re = int(st) + len(seq) - 1
+    dictBam = sorted(dictBam, key=lambda k: (k['rs']))
+    for i in range(len(dictBam)):
+        dictBam[i]['rpos'] = i
     return (dictBam)
