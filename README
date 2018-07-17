@@ -42,6 +42,11 @@ A GFF file is used for the consequence prediction of the variants.
 An example of a GFF file can be found here:
 ftp://ftp.ensembl.org/pub/release-92/gff3/mus_musculus/Mus_musculus.GRCm38.92.gff3.gz
 
+# Software requirements
+CrisprCon requires that BWA, SAMtools, and BCFtools are in the path.
+
+BCFtools csq runs with the option --force. Therefore, a version of BCFtools higher or equal than 1.9 is required. 
+
 
 Usage: ./crisprcon.py [-h] {crispFa,crispRNA}
 
