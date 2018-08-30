@@ -116,6 +116,10 @@ def _filter_vcf(dictreader, outVCF, dictBam, grna, hs, he, ref_genome):
 
         # Sort all results
         output_vcf.sort()
+        if len(output_vcf) == 0:
+            if os.path.isfile(outVCF):
+                os.remove(outVCF)
+            exit('ERROR: Failing to detect variants. No variants found.')
         output = "\n".join(["\t".join(map(str, vcf_row)) for vcf_row in output_vcf])
 
         # Write record

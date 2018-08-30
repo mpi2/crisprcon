@@ -53,9 +53,12 @@ def _frt_analysis(fasta, recombinate):
 def _isSSR(in_fa):
     with open(in_fa, 'r') as fasta:
         for line in fasta:
-            if not line.startswith('>'):
+            if line.startswith('>') or line.startswith('@'):
+                continue
+            else:
                 if any(line.find(TARGET_SEQ[c]) >= 0 for c in TARGET_SEQ):
                     return True
+                break
         return False
 
 
@@ -76,8 +79,6 @@ def _ssrReadPos(fasta, dictBam):
     ssr_pos = []
     for pos in all_pos:
         pseq = get_pseq(fasta, pos, dictBam, ssr_seq)
-        print ('This is the previous sequence')
-        print (pseq)
         ssr_read = get_ssrRead(pseq, dictBam, pos)
         gpos = get_ssrPos(ssr_read, pos, fasta, ssr_seq, pseq, dictBam)
         ssr_pos.append(gpos)
@@ -86,16 +87,10 @@ def _ssrReadPos(fasta, dictBam):
 
 def get_pseq(fasta, pos, dictBam, ssr_seq):
     pseq = fasta[(pos - 20):pos]
-    print ('Pseq before any changes')
-    print (pseq)
     if not any([c['seq'].find(pseq) >= 0 for c in dictBam]):
         pseq = fasta[(pos + len(ssr_seq)):(pos + len(ssr_seq) + 20)]
-        print ('Not before so we try after')
-        print (pseq)
     if not any([c['seq'].find(pseq) >= 0 for c in dictBam]):
         pseq = False
-        print ('Nothing works')
-        print (pseq)
     return (pseq)
 
 
@@ -125,21 +120,11 @@ def get_ssrPos(ssr_read, pos, fasta, ssr_seq, pseq, dictBam):
             gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
             return (gpos)
     pseq_pos = fasta.find(pseq)
-    print ('This is pseq')
-    print (pseq)
-    print ('This is pseq_pos')
-    print (pseq_pos)
-    print ('This is pos')
-    print (pos)
-    print ('This is ssr_read')
-    print (ssr_read)
 
     if pos > pseq_pos:
         rpos = ssr_read['seq'].find(pseq) + 20
     else:
         rpos = ssr_read['seq'].find(pseq) - 20 - len(ssr_seq)
-    print ('This is rpos')
-    print (rpos)
 
     if rpos < 0:
         # gpos = ssr_read['gs'] if ssr_read['strand'] == '+' else ssr_read['ge']
@@ -171,8 +156,6 @@ def get_ssrPos(ssr_read, pos, fasta, ssr_seq, pseq, dictBam):
 
     gpos = gpos + (rpos - gposM) + ssr_read['gs']
     gpos = '{}:{}-{}'.format(ssr_read['chrom'], gpos, gpos + len(ssr_seq))
-    print ('This is gpos')
-    print (gpos)
     if gpos == ssr_read['gs'] and ssr_read['rpos'] != 0:
         gpos = dictBam[ssr_read['rpos'] - 1]['ge']
 
@@ -210,11 +193,6 @@ def mergeINS(vcf, read, dictBam):
             if [c for c in var[7].split(';') if 'SVTYPE' in c][0].split('=')[1] == 'INS:LOXP' or [c for c in var[7].split(';') if 'SVTYPE' in c][0].split('=')[1] == 'INS:FRT':
                 if [c for c in nvar[7].split(';') if 'SVTYPE' in c][0].split('=')[1] == 'INS' and [var[0], var[1]] == [nvar[0], nvar[1]]:
                     # Check which one comes first in the read
-                    print ('This is the read')
-                    print (read)
-                    print ('And these the sequences')
-                    print (var[4][1:])
-                    print (nvar[4][1:])
                     varSeqPos = [j for j in range(len(read)) if read.startswith(var[4][1:], j)][ssr_n] if go == '+' else [j for j in range(len(read)) if reverseComplement(read).startswith(reverseComplement(var[4][1:]), j)][ssr_n]
                     nvarSeqPos = read.find(nvar[4][1:]) if go == '+' else reverseComplement(read).find(nvar[4][1:])
                     # if nvarSeqPos < 0:
@@ -222,9 +200,7 @@ def mergeINS(vcf, read, dictBam):
                     #     nvarSeqPos = reverseComplement(read).find(reverseComplement(var[4][1:]))
 
                     # Merge them in the same order
-                    print ('These are the positions of the sequences. Should be higher than 0')
-                    print (varSeqPos)
-                    print (nvarSeqPos)
+
                     if nvarSeqPos > 0:
                         if varSeqPos < nvarSeqPos:
                             seq = var[4] + nvar[4][1:]
@@ -250,15 +226,10 @@ def mergeINS(vcf, read, dictBam):
             if [c for c in var[7].split(';') if 'SVTYPE' in c][0].split('=')[1] == 'INS':
                 if ([c for c in nvar[7].split(';') if 'SVTYPE' in c][0].split('=')[1] == 'INS:LOXP' or [c for c in nvar[7].split(';') if 'SVTYPE' in c][0].split('=')[1] == 'INS:FRT') and [var[0], var[1]] == [nvar[0], nvar[1]]:
                     # Check which one comes first in the read
-                    print ('This is the read')
-                    print (read)
                     varSeqPos = read.find(var[4][1:]) if go == '+' else reverseComplement(read).find(var[4][1:])
                     # if varSeqPos < 0:
                     #     varSeqPos = read.find(reverseComplement(var[4][1:]))
                     nvarSeqPos = [j for j in range(len(read)) if read.startswith(var[4][1:], j)][ssr_n] if go == '+' else [j for j in range(len(read)) if reverseComplement(read).startswith(reverseComplement(var[4][1:]), j)][ssr_n]
-                    print ('These are the positions of the sequences. Should be higher than 0')
-                    print (varSeqPos)
-                    print (nvarSeqPos)
                     # Merge them in the same order
                     if varSeqPos > 0:
                         if varSeqPos < nvarSeqPos:

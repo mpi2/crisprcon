@@ -1,46 +1,66 @@
 
 import subprocess
-from .cigarParser import parse_cigar
+from .cigarParser import parse_cigar, parseMD
 from sys import exit
 from .alignment import flatten
 from .ssr import _isSSR, _getSsrType, _ssrReadPos, TARGET_SEQ, mergeINS
 from .vcfheader import vcf_header
+import math
 
 
 def main(dictBam, out_vcf, ref_genome, in_fa, temp, prefix):
 
-    minSV = 15
+    minSV = 1
 
     with open(out_vcf, mode='w') as writer:
         out = []
         header = vcf_header(ref_genome)
         writer.write(header.h)
+
         if _isSSR(in_fa):
             with open(in_fa, 'r') as fasta_ssr:
                 for line in fasta_ssr:
-                    if not line.startswith('>'):
+                    if line.startswith('>') or line.startswith('@'):
+                        continue
+                    else:
                         seq = line
                         fasta_ssr_line = line
+                        break
             out.append(list(flatten(inferSSR(dictBam=dictBam, ref_genome=ref_genome, in_fa=in_fa, ssr_type=_getSsrType(fasta_ssr_line)[0], ssr_pos=_ssrReadPos(fasta=fasta_ssr_line, dictBam=dictBam)))))
             in_fa = temp + '{}.noSSR.fasta'.format(prefix)
 
         with open(in_fa, 'r') as fasta:
-            for line in fasta:
-                if not line.startswith('>'):
-                    try:
-                        seq
-                    except:
-                        seq = line
-                    fasta_line = line
-        out.append(list(flatten(inferVariants(dictBam=dictBam, ref_genome=ref_genome, in_fa=in_fa, minSV=minSV, fasta=fasta_line))))
-        out.append(list(flatten(inferIndels(dictBam=dictBam, ref_genome=ref_genome))))
+            while True:
+                header = fasta.readline()
+                if not header.rstrip():
+                    break
+                seq_line = fasta.readline()
+                if header.startswith('>'):
+                    in_fa = '{}{}'.format(header, seq_line).rstrip()
+                elif header.startswith('@'):
+                    qual_header = fasta.readline()
+                    qual_line = fasta.readline()
+                    in_fa = '{}{}{}{}'.format(header, seq_line, qual_header, qual_line).rstrip()
+                else:
+                    exit('ERROR: Header {} seems malformed. Not fasta or fastq'.format(header))
+        try:
+            seq
+        except:
+            seq = seq_line
 
-        out = mergeINS(list(flatten(out)), seq, dictBam)
+        out.append(list(flatten(inferVariants(dictBam=dictBam, ref_genome=ref_genome, fasta=in_fa, minSV=minSV))))
+        out.append(list(flatten(inferIndels(dictBam=dictBam, ref_genome=ref_genome))))
+        out.append(list(flatten(inferSNP(dictBam=dictBam))))
+        out = list(flatten(out))
+        if len(out) == 0:
+            exit('ERROR: Failing to detect variants. No variants found.')
+
+        out = mergeINS(out, seq, dictBam)
 
         writer.write(''.join(flatten(out)))
 
 
-def inferVariants(dictBam, ref_genome, in_fa, minSV, fasta):
+def inferVariants(dictBam, ref_genome, minSV, fasta):
 
     output = []
 
@@ -50,11 +70,8 @@ def inferVariants(dictBam, ref_genome, in_fa, minSV, fasta):
     lf = [c for c in dictBam if c['rpos'] == 0][0]
     rf = [c for c in dictBam if c['rpos'] == len(dictBam)-1][0]
     homArmDown = lf if lf['gs'] < rf['gs'] else rf
-    print ('Homology arm downstream')
-    print (homArmDown)
     homArmUps = rf if rf['ge'] > lf['ge'] else lf
-    print ('Homology arm upstream')
-    print (homArmUps)
+
     if homArmDown['strand'] != homArmUps['strand']:
         exit('ERROR: Exit variant calling: homologous regions have different orientation.')
 
@@ -66,8 +83,7 @@ def inferVariants(dictBam, ref_genome, in_fa, minSV, fasta):
 
     i = 0
     while i < len(dictBam)-1:
-        print ('Iteration number')
-        print (i)
+
         read = [c for c in dictBam if c['rpos'] == i][0]
         if len(dictBam) == 2:
             nread = [c for c in dictBam if c['rpos'] == i+1][0]
@@ -85,29 +101,17 @@ def inferVariants(dictBam, ref_genome, in_fa, minSV, fasta):
             except:
                 i += 1
                 continue
-            print ('The iteration number is')
-            print (i)
-            print ('The read is')
-            print (read)
-            print ('The nread is')
-            print (nread)
-            print ('The ncread is')
-            print (ncread)
 
             if nread == ncread:
-                print ('one')
                 output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False, dictBam=dictBam))
             elif nread['ge'] <= homArmDown['gs'] or nread['gs'] >= homArmUps['ge'] or nread['chrom'] != gc:
-                print ('two')
                 output.append(inferDUP(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
                 output.append(inferSimpleSV(read=read, nread=ncread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=True, dictBam=dictBam))
                 i += 1
             # elif (go == '+' and nread['gs'] >= read['ge'] and nread['ge'] <= ncread['gs']) or (go == '-' and nread['ge'] <= read['gs'] and nread['gs'] >= ncread['ge']):
             elif (nread['gs'] >= read['ge'] and nread['ge'] <= ncread['gs']):
-                print ('three')
                 output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False, dictBam=dictBam))
             elif (nread['gs'] >= read['gs'] and nread['ge'] <= read['ge']) or (nread['gs'] >= ncread['gs'] and nread['ge'] <= ncread['ge']):
-                print ('four')
                 output.append(inferSimpleSV(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False, dictBam=dictBam))
                 output.append(inferSimpleSV(read=read, nread=ncread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=True, dictBam=dictBam))
                 i += 1
@@ -116,11 +120,8 @@ def inferVariants(dictBam, ref_genome, in_fa, minSV, fasta):
             # elif go == '-' and (nread['gs'] >= read['ge'] or nread['ge'] <= ncread['gs']):
             #     output.append(inferDUP(read=read, nread=nread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
             elif (nread['ge'] <= read['gs'] or nread['gs'] >= ncread['ge']):
-                print ('five')
                 output.append(inferDUP(read=read, nread=nread, ncread=ncread, go=go, gc=gc, ref_genome=ref_genome, minSV=minSV, fasta=fasta, nested=False))
             i += 1
-            print ('And the output so far is:')
-            print (output)
             continue
 
     return (output)
@@ -154,19 +155,71 @@ def inferIndels(dictBam, ref_genome):
                 svend = pos - 1
                 ref = ''.join(seq[read_pos-1])
                 alt = ''.join(seq[(read_pos-1):(read_pos + event[1])])
-                indels.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={}\n'.format(read['chrom'], pos-1, ref, alt, svtype, svlen, svend))
+                ins_phred = ins_qual(read['qual'][(read_pos):(read_pos + event[1])]) if read['qual'] != '*' else '.'
+                indels.append('{}\t{}\t.\t{}\t{}\t{}\t.\tSVTYPE={};SVLEN={};END={}\n'.format(read['chrom'], pos-1, ref, alt, ins_phred, svtype, svlen, svend))
                 read_pos += event[1]
             elif event[0] == 'S' or event[0] == 'H':
                 continue
     return (indels)
 
-# def inferSNP(dictBam):
-#     snps = []
-#     for i in range(len(dictBam)):
+
+def inferSNP(dictBam):
+    snps = []
+    for read in dictBam:
+        mm = []
+        read_snps = []
+        cigarParsed = parse_cigar(read['cigar'])
+        mdParsed = parseMD(read['tags'].split(':')[-1])
+        g = 0
+        r = 0
+        for m in mdParsed:
+            if m == 'D':
+                g += 1
+                continue
+            elif m == 'M':
+                r += 1
+                g += 1
+                continue
+            else:
+                mm.append([r, g, m])
+                r += 1
+                g += 1
+        if any('I' in c for c in cigarParsed):
+            pos = 0
+            for event in cigarParsed:
+                if event[0] == 'S' or event[0] == 'H' or event[0] == 'D':
+                    continue
+                if event[0] == 'M':
+                    pos += event[1]
+                if event[0] == 'I':
+                    for i in range(len(mm)):
+                        if mm[i][0] > pos:
+                            mm[i][0] += event[1]
+                    pos += event[1]
+        for m in mm:
+            chrom = read['chrom']
+            st = read['gs'] + m[1]
+            ref = m[2]
+            alt = read['seq'][m[0]]
+            qual = get_phred(read['qual'])[m[0]] if read['qual'] != '*' else '.'
+            if alt not in ['A', 'C', 'G', 'T']:
+                continue
+            read_snps.append('{}\t{}\t.\t{}\t{}\t{}\t.\t.\n'.format(chrom, st, ref, alt, qual))
+        snps.append(read_snps)
+    return (snps)
 
 
 def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested, dictBam):
     sv = []
+
+    header = fasta.split('\n')[0]
+    seq_line = fasta.split('\n')[1]
+    qual_header = ''
+    qual_line = ''
+    if header.startswith('@'):
+        qual_header = fasta.split('\n')[2]
+        qual_line = fasta.split('\n')[3]
+
     if nread['gs'] - read['ge'] > minSV:
         svstart = read['ge'] - 1
         svend = nread['gs'] - 1
@@ -175,62 +228,65 @@ def inferSimpleSV(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested,
         ref = get_ref(ref_genome, read['chrom'], (svstart), int(svend))
         alt = ref[0]
         sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend))
-        print ('THe deletion is')
-        print (sv)
-    if (max(nread['rs'], read['rs']) - min(read['re'], nread['re'])) - [nread['gs'] - read['ge'] if nread['gs'] - read['ge'] > 0 else 0][0] > minSV:
+    if (max(nread['rs'], read['rs']) - min(read['re'], nread['re'])) - [nread['gs'] - read['ge'] if nread['gs'] - read['ge'] > 0 else 0][0] > minSV and nested is False:
         svstart = read['ge'] - 1
         svend = svstart
         svtype = 'INS'
         ref = get_ref(ref_genome, read['chrom'], (svstart), int(svend))
-        alt = ref + fasta[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]
-        sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svend))
+        alt = ref + seq_line[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]
+        qual = ins_qual(qual_line[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]) if read['qual'] != '*' else '.'
+        sv.append('{}\t{}\t.\t{}\t{}\t{}\t.\tSVTYPE={};END={}\n'.format(read['chrom'], svstart, ref, alt, qual, svtype, svend))
 
     elif min(read['re'], nread['re']) < max(nread['rs'], read['rs']) and nested is False:
         svstart = read['ge'] - 1
         svend = svstart
         svtype = 'INS'
         ref = get_ref(ref_genome, read['chrom'], (svstart), int(svend))
-        alt = ref + fasta[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]
-        sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svend))
+        alt = ref + seq_line[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]
+        qual = get_phred(qual_line[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]) if read['qual'] != '*' else '.'
+        sv.append('{}\t{}\t.\t{}\t{}\t{}\t.\tSVTYPE={};END={}\n'.format(read['chrom'], svstart, ref, alt, qual, svtype, svend))
 
     if min(nread['re'], ncread['re']) < max(nread['rs'], ncread['rs']) and nested is False and nread != ncread and ncread['rpos'] == nread['rpos'] + 1:
         svstart = read['ge'] - 1
         svend = svstart
         svtype = 'INS'
         ref = get_ref(ref_genome, read['chrom'], (svstart), int(svend))
-        alt = ref + fasta[min(nread['re'], ncread['re'])-1:max(ncread['rs'], nread['rs'])-1]
-        sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={}\n'.format(nread['chrom'], svstart, ref, alt, svtype, svend))
+        alt = ref + seq_line[min(nread['re'], ncread['re'])-1:max(ncread['rs'], nread['rs'])-1]
+        qual = get_phred(qual_line[min(read['re'], nread['re'])-1:max(nread['rs'], read['rs'])-1]) if read['qual'] != '*' else '.'
+        sv.append('{}\t{}\t.\t{}\t{}\t{}\t.\tSVTYPE={};END={}\n'.format(read['chrom'], svstart, ref, alt, qual, svtype, svend))
 
     if min(read['ge'], nread['ge']) > max(nread['gs'], read['gs']) + minSV:
         if read['ge'] == nread['gs']:
             # TODO: Maybe we can allow for more than 1 tandem duplication
             cs = max(nread['gs'], read['gs'])
             ce = min(read['ge'], nread['ge'])
-            dupSeq = get_ref(ref_genome, read['chrom'], cs - 1, ce - 1)
+            dupSeq = get_ref(ref_genome, read['chrom'], cs, ce - 1)
             svstart = max(read['ge'], nread['ge']) - 1
             svend = svstart
             svlen = len(dupSeq)
             svtype = 'DUP:TANDEM' if nread['strand'] == go else 'INVDUP:TANDEM'
             ref = get_ref(ref_genome, read['chrom'], svstart, svend)
             alt = ref + dupSeq
+            qual = nread['mq']
             coords = '{}:{}-{}'.format(nread['chrom'], cs, ce - 1)
-            sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend, coords))
-            return (sv)
+            sv.append('{}\t{}\t.\t{}\t{}\t{}\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, qual, svtype, svlen, svend, coords))
+            # return (sv)
 
         else:
             cs = max(nread['gs'], read['gs'])
             ce = min(read['ge'], nread['ge'])
             svstart = max(read['ge'], nread['ge']) - 1
             svend = svstart
-            dupSeq = get_ref(ref_genome, read['chrom'], cs - 1, ce - 1)
+            dupSeq = get_ref(ref_genome, read['chrom'], cs, ce - 1)
 
             svlen = len(dupSeq)
             svtype = 'DUP' if nread['strand'] == go else 'INVDUP'
             ref = get_ref(ref_genome, read['chrom'], int(svstart), int(svend))
-            alt = ref + nread['seq']
+            alt = ref + dupSeq
+            qual = nread['mq']
             coords = '{}:{}-{}'.format(nread['chrom'], cs, ce - 1)
-            sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svlen, svend, coords))
-            return(sv)
+            sv.append('{}\t{}\t.\t{}\t{}\t{}\t.\tSVTYPE={};SVLEN={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, qual, svtype, svlen, svend, coords))
+            # return(sv)
 
     if nread['strand'] != go:
         svstart = nread['gs']
@@ -254,8 +310,9 @@ def inferDUP(read, nread, ncread, go, gc, ref_genome, minSV, fasta, nested):
         svtype = 'DUP' if nread['strand'] == go else 'INVDUP'
     ref = get_ref(ref_genome, read['chrom'], (svstart), int(svend))
     alt = ref + nread['seq']
+    qual = nread['mq']
     coords = '{}:{}-{}'.format(nread['chrom'], nread['gs'], nread['ge'] - 1)
-    sv.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, svtype, svend, coords))
+    sv.append('{}\t{}\t.\t{}\t{}\t{}\t.\tSVTYPE={};END={};DUPCOORDS={}\n'.format(read['chrom'], svstart, ref, alt, qual, svtype, svend, coords))
 
     if min(read['re'], nread['re']) < max(nread['rs'], read['rs']) and nested is False:
         svstart = read['ge'] - 1
@@ -295,3 +352,36 @@ def inferSSR(ssr_pos, dictBam, ssr_type, in_fa, ref_genome):
 
         ssr_ins.append('{}\t{}\t.\t{}\t{}\t.\t.\tSVTYPE={};END={}\n'.format(chrom, svstart, ref, alt, svtype, svend))
     return(ssr_ins)
+
+
+# def get_phred(qual_str):
+#     # There might still be rare situations where this will fail. There is no right way to cover all cases
+#     vals = [ord(c) for c in qual_str]  # Get the values for each symbol
+#     val_range = (min(vals), max(vals))
+#     if val_range[0] < 64:  # If the min value is smaller than 64, it must be Phred+33
+#         return([x-33 for x in vals])
+#     elif val_range[0] >= 64:  # If the min value is higher than 64, it must be Phred+64
+#         return([x-64 for x in vals])
+
+def get_phred(qual_str):
+    # There might still be rare situations where this will fail. There is no right way to cover all cases
+    vals = [ord(c) for c in qual_str]  # Get the values for each symbol
+    return([x-33 for x in vals])
+
+
+def calc_phred(prob):
+    return (round(-10*math.log10(prob), 2))
+
+
+def ins_prob(phred_list):
+    probs = [1 - (10**(-x/10)) for x in phred_list]
+    fragment_prob = 1
+    for x in probs:
+        fragment_prob *= x
+    return(1 - fragment_prob)
+
+
+def ins_qual(qual_str):
+    phred_list = get_phred(qual_str)
+    ins_probs = ins_prob(phred_list)
+    return(calc_phred(ins_probs))

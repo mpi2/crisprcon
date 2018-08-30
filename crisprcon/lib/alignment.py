@@ -8,31 +8,61 @@ import fileinput
 import os
 import glob
 from .ssr import _isSSR, _ssr_analysis
+from difflib import SequenceMatcher
 
 FNULL = open(os.devnull, 'w')
 
 
-def main(in_fa, out_bam, ref, mref, chrom, ts, te, temp, prefix):
+def main(input_fa, out_bam, ref, mref, chrom, ts, te, temp, prefix):
 
     # Check for site specific recombination and remove it if present
-    if _isSSR(in_fa):
-        with open(in_fa) as fasta:
+    with open(input_fa) as fasta:
+
+        while True:
+            header = fasta.readline()
+            if not header.rstrip():
+                break
+            seq_line = fasta.readline()
+            if header.startswith('>'):
+                in_fa = '{}{}'.format(header, seq_line).rstrip()
+            elif header.startswith('@'):
+                qual_header = fasta.readline()
+                qual_line = fasta.readline()
+                in_fa = '{}{}{}{}'.format(header, seq_line, qual_header, qual_line).rstrip()
+            else:
+                exit('ERROR: Header {} seems malformed. Not fasta or fastq'.format(header))
+        print ('Instead of aligning ')
+        print (in_fa)
+
+        if _isSSR(input_fa):
+            header = in_fa.split('\n')[0] + '\n'
             with open(temp + '{}.noSSR.fasta'.format(prefix), 'w') as writer:
-                for line in fasta:
-                    if line.startswith('>'):
-                        writer.write(line)
-                    else:
-                        writer.write(_ssr_analysis(line))
-        in_fa = temp + '{}.noSSR.fasta'.format(prefix)
+                seq_line_noSSR = _ssr_analysis(seq_line)
 
-    # Index reference file
-    bwaIndex(ref)
-    refIndex(ref)
+                if header.startswith('>'):
+                    seq_line = seq_line_noSSR
+                    in_fa = '{}{}'.format(header, seq_line).rstrip()
+                    print ('We are aligning')
+                    print(in_fa)
+                if header.startswith('@'):
+                    matches = difflib.SequenceMatcher(None, seq_line, seq_line_noSSR).get_matching_blocks()
+                    ssr_start = matches[0].a + matches[0].size
+                    ssr_end = matches[1].a
 
-    # Perform the alignment using BWA in a recursive manner
-    sam = "\n".join(flatten(bwaAlign(in_fa, ref, mref, temp, chrom, ts, te, prefix)))
+                    seq_line = seq_line_noSSR
+                    qual_line = qual_line[0:start] + qual_line[end:]
+                    in_fa = '{}{}{}{}'.format(header, seq_line, qual_header, qual_line).rstrip()
+                writer.write(in_fa)
+            input_fa = temp + '{}.noSSR.fasta'.format(prefix)
 
-    # Exit pipeline of no alignments are found
+        # Index reference file
+        bwaIndex(ref)
+        refIndex(ref)
+
+        # Perform the alignment using BWA in a recursive manner
+        sam = "\n".join(flatten(bwaAlign(in_fa, ref, mref, temp, chrom, ts, te, prefix)))
+
+        # Exit pipeline of no alignments are found
     if len(sam) == 0:
         exit('ERROR: Failing to align. No alignments found.')
 
@@ -42,9 +72,11 @@ def main(in_fa, out_bam, ref, mref, chrom, ts, te, temp, prefix):
     # Create a dictionary of the alignments that will be used in the variant calling
     dictBam = sam2dict(sam=sam, in_fa=in_fa)
     dictBam = sorted(dictBam, key=lambda k: (k['rpos']))
+
     dictBam = dictBam_QC(dictBam, in_fa)  # Just check if the order of the reads is correct (non_overlapping starts and ends)
 
     # Invert the order of the reads if the homology arms aligned to the reverse strand
+
     if [c['strand'] for c in dictBam if c['rpos'] == 0][0] == '-':
         for i in range(len(dictBam)):
             dictBam[i]['rpos'] = len(dictBam) - 1 - i
@@ -53,9 +85,8 @@ def main(in_fa, out_bam, ref, mref, chrom, ts, te, temp, prefix):
     for files in glob.glob(mref + '*'):
         os.remove(files)
 
-    for files in glob.glob(in_fa + '.*'):
+    for files in glob.glob(input_fa + '.*'):
         os.remove(files)
-    print (dictBam)
     return (dictBam)
 
 
@@ -66,91 +97,109 @@ def bwaAlign(in_fa, ref, mref, temp, chrom, ts, te, prefix):
     """
     sam = []
     interval = 10000
-    with open(in_fa) as fasta:
-        for line in fasta:
-            if line.startswith('>'):
-                fasta_header = line
-                continue
-            if len(line) >= 90:
-                read = largeAlign(in_fa, ref)
-                if not read:
-                    continue
-                sam.append(read)
-                cigar = parse_cigar(read.split('\t')[5])
-                # If there is any clipping, recover the clipped fragment and call bwaAlign with it.
-                if any(['S' in c for c in cigar]):
-                    readPos = 0
-                    it = 1
-                    for event in cigar:
-                        if event[0] == 'S':
-                            output = open(temp + '{}.{}To{}.fasta'.format(prefix, readPos, event[1]), 'w')
-                            if list(flagAsBin(int(read.split('\t')[1])))[-5] == '1':
-                                line_rev = reverseComplement(line)
-                                output.write(fasta_header + reverseComplement(line_rev[readPos:event[1]]) + '\n') if it != len(cigar) else output.write(fasta_header + reverseComplement(line_rev[readPos:len(line_rev)]))
-                                output.close()
-                            else:
-                                output.write(fasta_header + line[readPos:event[1]] + '\n') if it != len(cigar) else output.write(fasta_header + line[readPos:len(line)])
-                                output.close()
-                            sam.append(bwaAlign(in_fa=temp + '{}.{}To{}.fasta'.format(prefix, readPos, event[1]), ref=ref, mref=mref, temp=temp, chrom=chrom, ts=ts, te=te, prefix=prefix))
-                            readPos += event[1]
-                        else:
-                            readPos += event[1]
-                        it += 1
 
-            if len(line) > 50 and len(line) < 90:
-            # if len(line) > 50:
-                if not os.path.exists(mref):
-                    trimRef(ref, chrom, int(ts) - interval, int(te) + interval, mref)
-                read = largeAlign(in_fa, mref)
-                if not read:
-                    continue
-                sam.append(read)
-                cigar = parse_cigar(read.split('\t')[5])
-                if any(['S' in c for c in cigar]):
-                    readPos = 0
-                    it = 1
-                    for event in cigar:
-                        if event[0] == 'S':
-                            output = open(temp + '{}.{}To{}.fasta'.format(prefix, readPos, event[1]), 'w')
-                            if list(flagAsBin(int(read.split('\t')[1])))[-5] == '1':
-                                line_rev = reverseComplement(line)
-                                output.write(fasta_header + reverseComplement(line_rev[readPos:event[1]]) + '\n') if it != len(cigar) else output.write(fasta_header + reverseComplement(line_rev[readPos:len(line_rev)]))
-                                output.close()
-                            else:
-                                output.write(fasta_header + line[readPos:event[1]] + '\n') if it != len(cigar) else output.write(fasta_header + line[readPos:len(line)])
-                                output.close()
-                            sam.append(bwaAlign(in_fa=temp + '{}.{}To{}.fasta'.format(prefix, readPos, event[1]), ref=ref, mref=mref, temp=temp, chrom=chrom, ts=ts, te=te, prefix=prefix))
-                            readPos += event[1]
-                        else:
-                            readPos += event[1]
-                        it += 1
+    header = in_fa.split('\n')[0]
+    seq_line = in_fa.split('\n')[1]
+    qual_header = ''
+    qual_line = ''
+    if header.startswith('@'):
+        qual_header = in_fa.split('\n')[2]
+        qual_line = in_fa.split('\n')[3]
 
-            if len(line) < 50 and len(line) >= 20:
-                if not os.path.exists(mref):
-                    trimRef(ref, chrom, int(ts) - interval, int(te) + interval, mref)
-                read = smallAlign(in_fa, mref)
-                if not read:
-                    continue
-                sam.append(read)
-                cigar = parse_cigar(read.split('\t')[5])
-                if any(['S' in c for c in cigar]):
-                    readPos = 0
-                    it = 1
-                    for event in cigar:
-                        if event[0] == 'S':
-                            output = open(temp + '{}.{}To{}.fasta'.format(prefix, readPos, event[1]), 'w')
-                            if list(flagAsBin(int(read.split('\t')[1])))[-5] == '1':
-                                line_rev = reverseComplement(line)
-                                output.write(fasta_header + reverseComplement(line_rev[readPos:event[1]]) + '\n') if it != len(cigar) else output.write(fasta_header + reverseComplement(line_rev[readPos:len(line_rev)]))
-                                output.close()
-                            else:
-                                output.write(fasta_header + line[readPos:event[1]] + '\n') if it != len(cigar) else output.write(fasta_header + line[readPos:len(line)])
-                                output.close()
-                            sam.append(bwaAlign(in_fa=temp + '{}.{}To{}.fasta'.format(prefix, readPos, event[1]), ref=ref, mref=mref, temp=temp, chrom=chrom, ts=ts, te=te, prefix=prefix))
-                            readPos += event[1]
-                        else:
-                            readPos += event[1]
-                        it += 1
+    if len(seq_line) >= 90:
+        read = largeAlign(in_fa, ref)
+        if not read:
+            return(sam)
+        sam.append(read)
+        cigar = parse_cigar(read.split('\t')[5])
+        # If there is any clipping, recover the clipped fragment and call bwaAlign with it.
+        if any(['S' in c for c in cigar]):
+            readPos = 0
+            it = 1
+            for event in cigar:
+                if event[0] == 'S':
+                    if list(flagAsBin(int(read.split('\t')[1])))[-5] == '1':
+                        if header.startswith('>'):
+                            line_rev = reverseComplement(seq_line)
+                            out_fa = header + '\n' + reverseComplement(line_rev[readPos:event[1]]) if it != len(cigar) else header + '\n' + reverseComplement(line_rev[readPos:len(line_rev)])
+                        elif header.startswith('@'):
+                            line_rev = reverseComplement(seq_line)
+                            qual_rev = qual_line[::-1]
+                            out_fa = header + '\n' + reverseComplement(line_rev[readPos:event[1]]) + '\n' + qual_header + '\n' + qual_rev[readPos:event[1]][::-1] if it != len(cigar) else header + '\n' + reverseComplement(line_rev[readPos:len(line_rev)]) + '\n' + qual_header + '\n' + qual_rev[readPos:len(line_rev)][::-1]
+                    else:
+                        if header.startswith('>'):
+                            out_fa = header + '\n' + seq_line[readPos:event[1]] if it != len(cigar) else header + '\n' + seq_line[readPos:len(seq_line)]
+                        elif header.startswith('@'):
+                            out_fa = header + '\n' + seq_line[readPos:event[1]] + '\n' + qual_header + '\n' + qual_line[readPos:event[1]] if it != len(cigar) else header + '\n' + seq_line[readPos:len(seq_line)] + '\n' + qual_header + '\n' + qual_line[readPos:len(seq_line)]
+                    sam.append(bwaAlign(in_fa=out_fa, ref=ref, mref=mref, temp=temp, chrom=chrom, ts=ts, te=te, prefix=prefix))
+                    readPos += event[1]
+                else:
+                    readPos += event[1]
+                it += 1
+    if len(seq_line) >= 50 and len(seq_line) < 90:
+    # if len(seq_line) > 50:
+        if not os.path.exists(mref):
+            trimRef(ref, chrom, int(ts) - interval, int(te) + interval, mref)
+        read = largeAlign(in_fa, mref)
+        if not read:
+            return(sam)
+        sam.append(read)
+        cigar = parse_cigar(read.split('\t')[5])
+        if any(['S' in c for c in cigar]):
+            readPos = 0
+            it = 1
+            for event in cigar:
+                if event[0] == 'S':
+                    if list(flagAsBin(int(read.split('\t')[1])))[-5] == '1':
+                        if header.startswith('>'):
+                            line_rev = reverseComplement(seq_line)
+                            out_fa = header + '\n' + reverseComplement(line_rev[readPos:event[1]]) if it != len(cigar) else header + '\n' + reverseComplement(line_rev[readPos:len(line_rev)])
+                        elif header.startswith('@'):
+                            line_rev = reverseComplement(seq_line)
+                            qual_rev = qual_line[::-1]
+                            out_fa = header + '\n' + reverseComplement(line_rev[readPos:event[1]]) + '\n' + qual_header + '\n' + qual_rev[readPos:event[1]][::-1] if it != len(cigar) else header + '\n' + reverseComplement(line_rev[readPos:len(line_rev)]) + '\n' + qual_header + '\n' + qual_rev[readPos:len(line_rev)][::-1]
+                    else:
+                        if header.startswith('>'):
+                            out_fa = header + '\n' + seq_line[readPos:event[1]] if it != len(cigar) else header + '\n' + seq_line[readPos:len(seq_line)]
+                        elif header.startswith('@'):
+                            out_fa = header + '\n' + seq_line[readPos:event[1]] + '\n' + qual_header + '\n' + qual_line[readPos:event[1]] if it != len(cigar) else header + '\n' + seq_line[readPos:len(seq_line)] + '\n' + qual_header + '\n' + qual_line[readPos:len(seq_line)]
+                    sam.append(bwaAlign(in_fa=out_fa, ref=ref, mref=mref, temp=temp, chrom=chrom, ts=ts, te=te, prefix=prefix))
+                    readPos += event[1]
+                else:
+                    readPos += event[1]
+                it += 1
+
+    if len(seq_line) < 50 and len(seq_line) >= 20:
+        if not os.path.exists(mref):
+            trimRef(ref, chrom, int(ts) - interval, int(te) + interval, mref)
+        read = smallAlign(in_fa, mref, temp, prefix)
+        if not read:
+            return(sam)
+        sam.append(read)
+        cigar = parse_cigar(read.split('\t')[5])
+        if any(['S' in c for c in cigar]):
+            readPos = 0
+            it = 1
+            for event in cigar:
+                if event[0] == 'S':
+                    if list(flagAsBin(int(read.split('\t')[1])))[-5] == '1':
+                        if header.startswith('>'):
+                            line_rev = reverseComplement(seq_line)
+                            out_fa = header + '\n' + reverseComplement(line_rev[readPos:event[1]]) if it != len(cigar) else header + '\n' + reverseComplement(line_rev[readPos:len(line_rev)])
+                        elif header.startswith('@'):
+                            line_rev = reverseComplement(seq_line)
+                            qual_rev = qual_line[::-1]
+                            out_fa = header + '\n' + reverseComplement(line_rev[readPos:event[1]]) + '\n' + qual_header + '\n' + qual_rev[readPos:event[1]][::-1] if it != len(cigar) else header + '\n' + reverseComplement(line_rev[readPos:len(line_rev)]) + '\n' + qual_header + '\n' + qual_rev[readPos:len(line_rev)][::-1]
+                    else:
+                        if header.startswith('>'):
+                            out_fa = header + '\n' + seq_line[readPos:event[1]] if it != len(cigar) else header + '\n' + seq_line[readPos:len(seq_line)]
+                        elif header.startswith('@'):
+                            out_fa = header + '\n' + seq_line[readPos:event[1]] + '\n' + qual_header + '\n' + qual_line[readPos:event[1]] if it != len(cigar) else header + '\n' + seq_line[readPos:len(seq_line)] + '\n' + qual_header + '\n' + qual_line[readPos:len(seq_line)]
+                    sam.append(bwaAlign(in_fa=out_fa, ref=ref, mref=mref, temp=temp, chrom=chrom, ts=ts, te=te, prefix=prefix))
+                    readPos += event[1]
+                else:
+                    readPos += event[1]
+                it += 1
 
     return (sam)
 
@@ -180,13 +229,13 @@ def largeAlign(in_fa, ref):
     Call the BWA mem aligner for long fragments
 
     '''
+    p1 = subprocess.run(['bwa', 'mem', '-c', '250', '-v', '1', '-k', '14', '-W', '20', '-r', '10',
+                        '-A', '1', '-L', '0', '-B', '4', '-O', '6', '-E', '6', ref, '-'],
+                        stdout=subprocess.PIPE, input=in_fa.encode(), stderr=FNULL)
+    p2 = subprocess.run(['samtools', 'view', '-F', '2048', '-F', '4', '-bS', '-'], input=p1.stdout, stdout=subprocess.PIPE)
+    p3 = subprocess.run(['samtools', 'sort', '-O', 'sam'], input=p2.stdout, stdout=subprocess.PIPE)  # TODO: do we need this?
+    sam = p3.stdout.decode("utf-8")
 
-    p1 = subprocess.Popen(['bwa', 'mem', '-c', '250', '-v', '1', ref, in_fa], stdout=subprocess.PIPE, stderr=FNULL)
-    p2 = subprocess.Popen(['samtools', 'view', '-F', '2048', '-F', '4', '-bS', '-'], stdin=p1.stdout, stdout=subprocess.PIPE)
-    p1.stdout.close()
-    p3 = subprocess.Popen(['samtools', 'sort', '-O', 'sam'], stdin=p2.stdout, stdout=subprocess.PIPE)
-    p2.stdout.close()
-    sam = p3.communicate()[0].decode('utf-8')
     read = '\n'.join([c for c in sam.split('\n') if not c.startswith('@') and len(c) is not 0])
     if read:
         if len(read.split('\t')[2].split(':')) > 1:
@@ -199,20 +248,24 @@ def largeAlign(in_fa, ref):
     return (read)
 
 
-def smallAlign(in_fa, ref):
+def smallAlign(in_fa, ref, temp, prefix):
     '''\
     Call the BWA aln aligner for small fragments
 
     '''
 
-    p1 = subprocess.Popen(['bwa', 'aln', '-l', '20', ref, in_fa], stdout=subprocess.PIPE, stderr=FNULL)
-    p2 = subprocess.Popen(['bwa', 'samse', ref, '-', in_fa], stdin=p1.stdout, stdout=subprocess.PIPE, stderr=FNULL)
-    p1.stdout.close()
-    p3 = subprocess.Popen(['samtools', 'view', '-q', '1', '-F', '2048', '-F', '4', '-bS', '-'], stdin=p2.stdout, stdout=subprocess.PIPE)
-    p2.stdout.close()
-    p4 = subprocess.Popen(['samtools', 'sort', '-O', 'sam'], stdin=p3.stdout, stdout=subprocess.PIPE)
-    p3.stdout.close()
-    sam = p4.communicate()[0].decode('utf-8')
+    p1 = subprocess.run(['bwa', 'aln', '-l', '20', ref, '-', '-f', '{}{}.aln'.format(temp, prefix)],
+                        input=in_fa.encode(), stdout=subprocess.PIPE, stderr=FNULL)
+    p2 = subprocess.run(['bwa', 'samse', ref, '{}{}.aln'.format(temp, prefix), '-'],
+                        input=in_fa.encode(), stdout=subprocess.PIPE, stderr=FNULL)
+    # p2 = subprocess.run(['bwa samse reference/C57BL_6J.fa <(bwa aln -l 20 reference/C57BL_6J.fa -) -'],
+    #                     shell=True, executable="/bin/bash", input=p1.stdout, stdout=subprocess.PIPE, stderr=FNULL)
+    p3 = subprocess.run(['samtools', 'view', '-q', '1', '-F', '2048', '-F', '4', '-bS', '-'],
+                        input=p2.stdout, stdout=subprocess.PIPE)
+    p4 = subprocess.run(['samtools', 'sort', '-O', 'sam'],
+                        input=p3.stdout, stdout=subprocess.PIPE)
+    sam = p4.stdout.decode("utf-8")
+
     read = '\n'.join([c for c in sam.split('\n') if not c.startswith('@') and len(c) is not 0])
     if read:
         if len(read.split('\t')[2].split(':')) > 1:
@@ -277,22 +330,25 @@ def flagAsBin(n):
 
 
 def getOrder(in_fa, substr, strand, p_st):
-    with open(in_fa) as fasta:
-        for line in fasta:
-            if not line.startswith('>'):
-                line = list(line)
-                for i in range(len(line)):
-                    if not line[i] in ['A', 'G', 'C', 'T']:
-                        line[i] = 'N'
-                line = ''.join(line)
-                if strand == '+':
-                    return(line.find(substr, p_st) + 1)
-                else:
-                    substr_rev = reverseComplement(substr)
-                    return(line.find(substr_rev, p_st) + 1)
+    for line in in_fa.split('\n'):
+        if line.startswith('>') or line.startswith('@'):
+            continue
+        else:
+            line = list(line)
+            for i in range(len(line)):
+                if not line[i] in ['A', 'G', 'C', 'T']:
+                    line[i] = 'N'
+            line = ''.join(line)
+            if strand == '+':
+                return(line.find(substr, p_st) + 1)
+            else:
+                substr_rev = reverseComplement(substr)
+                return(line.find(substr_rev, p_st) + 1)
 
 
 def getParsedSeq(seq, cigar):
+    if seq == '*':
+        return('*')
     cigar = parse_cigar(cigar)
     start = int(cigar[0][1]) if cigar[0][0] == 'S' or cigar[0][0] == 'H' else 0
     end = -int(cigar[len(cigar) - 1][1]) if cigar[len(cigar) - 1][0] == 'S' or cigar[len(cigar) - 1][0] == 'H' else len(seq)
@@ -316,11 +372,13 @@ def sam2dict(sam, in_fa):
         flag = read[1]
         strand = '-' if list(flagAsBin(int(flag)))[-5] == '1' else '+'
         seq = getParsedSeq(read[9], cigar)
+        qual = getParsedSeq(read[10], cigar)
         rs = getOrder(in_fa, seq, strand, 0)
         re = int(rs) + len(seq)
         chrom = read[2]
         gs = int(read[3])
         ge = int(read[3]) + len(seq)
+        mq = read[4]
         for c in cigarParsed:
             if c[0] == 'I':
                 ge -= c[1]
@@ -328,7 +386,7 @@ def sam2dict(sam, in_fa):
                 ge += c[1]
         tags = read[12]
 
-        d = {'chrom': chrom, 'strand': strand, 'gs': gs, 'ge': ge, 'cigar': cigar, 'seq': seq, 'tags': tags, 'rs': rs, 're': re}
+        d = {'chrom': chrom, 'strand': strand, 'gs': gs, 'ge': ge, 'cigar': cigar, 'seq': seq, 'qual': qual, 'mq': mq, 'tags': tags, 'rs': rs, 're': re}
         dictBam.append(d)
         n += 1
     dictBam = sorted(dictBam, key=lambda k: k['rs'])
@@ -343,8 +401,6 @@ def dictBam_QC(dictBam, in_fa):
     while not qc:
         it += 1
         dictBam = dictBam_reOrder(dictBam, in_fa)
-        print ('This is the qc iteration')
-        print (it)
         qc = is_qc(dictBam)
     return (dictBam)
 

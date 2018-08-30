@@ -14,15 +14,14 @@ def crispFa(input_fa, output_vcf, ref_genome, gff, dir, temp_dir, prefix, chrom,
     """
 
     output_bam = temp_dir + prefix + '.bam'
-    mm_vcf = temp_dir + prefix + '.MM.vcf.gz'
-    sr_vcf = temp_dir + prefix + '.SR.vcf'
+    vcf_temp = temp_dir + prefix + 'vcf.gz.temp'
 
     mref = list(ref_genome.rpartition('/'))
     mref.insert(-1, prefix + '.masked.')
     mref = ''.join(mref)
 
     # Performing alignment
-    dictBam = alignment(in_fa=input_fa,
+    dictBam = alignment(input_fa=input_fa,
                         out_bam=output_bam,
                         ref=ref_genome,
                         mref=mref,
@@ -31,32 +30,23 @@ def crispFa(input_fa, output_vcf, ref_genome, gff, dir, temp_dir, prefix, chrom,
                         te=te,
                         temp=temp_dir,
                         prefix=prefix)
-    # SNP calling
-    snpCalling(in_bam=output_bam,
-               out_vcf=mm_vcf,
-               ref=ref_genome)
 
-    # Infering structural variants and indels
+    # Infering structural variants, SNPs, and indels
     inferVariants(dictBam=dictBam,
-                  out_vcf=sr_vcf,
+                  out_vcf=vcf_temp,
                   ref_genome=ref_genome,
                   in_fa=input_fa,
                   temp=temp_dir,
                   prefix=prefix)
 
     # Variant normalization
-    svNorm(in_vcf=sr_vcf,
-           out_vcf=sr_vcf + '.gz',
+    svNorm(in_vcf=vcf_temp,
+           out_vcf=vcf_temp,
            ref=ref_genome)
-
-    # Merging variants
-    mergeVar(SR_vcf=sr_vcf + '.gz',
-             MM_vcf=mm_vcf,
-             out_vcf=output_vcf)
 
     # Filtering SNPs and small indels
     varFilter(dictBam=dictBam,
-              inVCF=output_vcf,
+              inVCF=vcf_temp,
               outVCF=output_vcf,
               grna=grna,
               ref_genome=ref_genome)

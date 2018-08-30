@@ -12,13 +12,13 @@ def svNorm(in_vcf, out_vcf, ref):
                            in_vcf],
                           stdout=subprocess.PIPE)
 
-    p2 = subprocess.Popen(['bcftools', 'sort', '-Oz', '-o', out_vcf], stdin=p1.stdout, stdout=subprocess.PIPE)
+    p2 = subprocess.Popen(['bcftools', 'sort', '-Ov', '-o', out_vcf], stdin=p1.stdout, stdout=subprocess.PIPE)
     p1.stdout.close()
     p2.communicate()[0]
 
-    subprocess.call(['tabix',
-                     '-p', 'vcf',
-                     out_vcf])
+    # subprocess.call(['tabix',
+    #                  '-p', 'vcf',
+    #                  out_vcf])
 
 
 # def svNorm(in_vcf, out_vcf, ref):

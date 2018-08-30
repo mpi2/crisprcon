@@ -23,6 +23,7 @@ Terry Meehan (tmeehan@ebi.ac.uk)
 1. General Information
 2. Variant calling (crispFa)
 3. gRNA consequence prediction (crispRNA)
+4. References
 
 # Last updated: June 2018
 
@@ -120,3 +121,34 @@ Optional arguments:
   -p PREFIX, --prefix PREFIX
                         Optional: Prefix for temporary files. Default: input_name
   -h, --help            Show this help message and exit
+
+
+
+#################
+# 5. References #
+#################
+
+Li H, Handsaker B, Wysoker A, Fennell T, Ruan J, Homer N,
+Marth G, Abecasis G, Durbin R; 1000 Genome Project Data
+Processing Subgroup. The Sequence Alignment/Map format and
+SAMtools. Bioinformatics. 2009 Aug 15;25(16):2078-9. Epub 2009 Jun
+8. PubMed PMID: 19505943; PubMed Central PMCID: PMC2723002.
+
+Danecek P, Auton A, Abecasis G, Albers CA, Banks E, DePristo MA,
+Handsaker RE, Lunter G, Marth GT, Sherry ST, McVean G, Durbin R;
+1000 Genomes Project Analysis Group. The variant call format and
+VCFtools. Bioinformatics. 2011 Aug 1;27(15):2156-8. Epub 2011 Jun
+7. PubMed PMID: 21653522; PubMed Central PMCID: PMC3137218.
+
+Petr Danecek, Shane A McCarthy; BCFtools/csq: haplotype-aware variant
+consequences, Bioinformatics, Volume 33, Issue 13, 1 July 2017,
+Pages 2037–2039.
+
+Li H, Durbin R. Fast and accurate short read alignment
+with Burrows-Wheeler transform. Bioinformatics. 2009 Jul
+15;25(14):1754-60. Epub 2009 May 18. PubMed PMID: 19451168; PubMed
+Central PMCID: PMC2705234.
+
+Aaron R. Quinlan, Ira M. Hall; BEDTools: a flexible suite of utilities
+for comparing genomic features, Bioinformatics, Volume 26, Issue 6,
+15 March 2010, Pages 841–842.
